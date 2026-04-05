@@ -345,6 +345,30 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
       <div id="export-status" style="font-size:11px;color:var(--text3);text-align:center;margin-top:6px;display:none"></div>
     </div>
 
+    <!-- Rekap Bulanan -->
+    <div class="card" style="margin-bottom:8px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">📊 Rekap Bulanan</div>
+      <div style="display:flex;gap:7px;margin-bottom:10px">
+        <select class="input" id="rekap-bulan" style="flex:1;margin-bottom:0" onchange="renderRekapBulanan()">
+          <option value="1">Januari</option><option value="2">Februari</option>
+          <option value="3">Maret</option><option value="4" selected>April</option>
+          <option value="5">Mei</option><option value="6">Juni</option>
+          <option value="7">Juli</option><option value="8">Agustus</option>
+          <option value="9">September</option><option value="10">Oktober</option>
+          <option value="11">November</option><option value="12">Desember</option>
+        </select>
+        <select class="input" id="rekap-tahun" style="width:80px;margin-bottom:0" onchange="renderRekapBulanan()">
+          <option value="2025">2025</option>
+          <option value="2026" selected>2026</option>
+          <option value="2027">2027</option>
+        </select>
+        <select class="input" id="rekap-outlet-filter" style="flex:1;margin-bottom:0" onchange="renderRekapBulanan()">
+          <option value="">Semua outlet</option>
+        </select>
+      </div>
+      <div id="rekap-bulanan-list"><div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">Pilih bulan untuk lihat rekap</div></div>
+    </div>
+
     <div class="card" id="rekap-list"></div>
   </div>
   <nav class="bottom-nav">
@@ -1091,6 +1115,123 @@ function ambilGPS(){
 
 function checkReady(){document.getElementById('btn-submit-clock').disabled=!(fotoReady&&gpsReady&&gpsValid)}
 
+// ===== REKAP BULANAN =====
+async function renderRekapBulanan() {
+  const bulan = parseInt(document.getElementById('rekap-bulan').value);
+  const tahun = parseInt(document.getElementById('rekap-tahun').value);
+  const outletFilter = document.getElementById('rekap-outlet-filter').value;
+  const container = document.getElementById('rekap-bulanan-list');
+  const bulanNama = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'];
+  const hariMax = new Date(tahun, bulan, 0).getDate();
+  const bulanStr = String(bulan).padStart(2,'0');
+
+  container.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px;font-size:13px">⏳ Memuat data...</div>';
+
+  try {
+    // Ambil absensi bulan ini
+    const absensi = await sbGet('absensi',
+      'tanggal=gte.01%2F'+bulanStr+'%2F'+tahun+
+      '&tanggal=lte.'+String(hariMax).padStart(2,'0')+'%2F'+bulanStr+'%2F'+tahun+
+      '&order=tanggal&limit=5000');
+
+    // Ambil crew
+    const crewParam = outletFilter
+      ? 'outlet_nama=eq.'+encodeURIComponent(outletFilter)+'&aktif=eq.true&order=outlet_nama,nama'
+      : 'aktif=eq.true&order=outlet_nama,nama';
+    const crews = await sbGet('crew', crewParam);
+
+    if(!crews || crews.length === 0) {
+      container.innerHTML = '<div style="text-align:center;color:var(--text3);padding:20px">Tidak ada data crew</div>';
+      return;
+    }
+
+    // Map absensi per nama
+    const absenMap = {};
+    if(absensi) absensi.forEach(a => {
+      if(!absenMap[a.nama]) absenMap[a.nama] = [];
+      absenMap[a.nama].push(a);
+    });
+
+    // Hitung per crew
+    function hitungCrew(nama) {
+      const rows = absenMap[nama] || [];
+      let masuk=0, libur=0, cuti=0, alpha=0, lembur=0;
+      rows.forEach(a => {
+        if(a.status==='masuk'||a.status==='lembur') masuk++;
+        else if(a.status==='libur') libur++;
+        else if(a.status==='cuti') cuti++;
+        else if(a.status==='alpha') alpha++;
+        if(a.lembur_jam) lembur += parseInt(a.lembur_jam)||0;
+      });
+      // Hari tanpa data = masuk (termasuk weekend)
+      const totalTercatat = masuk+libur+cuti+alpha;
+      const sisaHari = hariMax - totalTercatat;
+      masuk += sisaHari; // hari tanpa data dianggap masuk
+      const terhitung = alpha===0 ? masuk+libur+cuti : masuk+cuti;
+      const persen = Math.round((terhitung / hariMax) * 100);
+      return {masuk, libur, cuti, alpha, lembur, terhitung, persen};
+    }
+
+    // Group crew per outlet
+    const outletMap = {};
+    crews.forEach(c => {
+      if(!outletMap[c.outlet_nama]) outletMap[c.outlet_nama] = [];
+      outletMap[c.outlet_nama].push(c);
+    });
+
+    let html = '';
+    Object.keys(outletMap).forEach(outletNama => {
+      const outletCrew = outletMap[outletNama];
+      html += `<div style="margin-bottom:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--brand);margin-bottom:8px;padding:6px 10px;background:var(--brand-bg);border-radius:8px">
+          📍 ${outletNama}
+        </div>`;
+
+      outletCrew.forEach(c => {
+        const s = hitungCrew(c.nama);
+        const hasAlpha = s.alpha > 0;
+        const barColor = hasAlpha ? '#CC0000' : '#22c55e';
+        const persen = Math.min(s.persen, 100);
+
+        html += `<div style="padding:10px;border:1px solid var(--border);border-radius:10px;margin-bottom:6px;background:${hasAlpha ? '#fff5f5' : 'var(--surface)'}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <span style="font-size:13px;font-weight:600;color:var(--text)">${c.nama}</span>
+            <span style="font-size:12px;font-weight:700;color:${barColor}">${persen}%</span>
+          </div>
+          <div style="background:var(--border-soft);border-radius:99px;height:7px;margin-bottom:6px;overflow:hidden">
+            <div style="width:${persen}%;height:100%;background:${barColor};border-radius:99px;transition:width .3s"></div>
+          </div>
+          <div style="display:flex;gap:10px;font-size:11px;color:var(--text2)">
+            <span>✓ Masuk: <b>${s.masuk}</b></span>
+            <span>📅 Libur: <b>${s.libur}</b></span>
+            ${s.alpha > 0 ? `<span style="color:#CC0000">⚠️ Alpha: <b>${s.alpha}</b></span>` : ''}
+            ${s.lembur > 0 ? `<span style="color:#d97706">⏱ Lembur: <b>${s.lembur} jam</b></span>` : ''}
+          </div>
+        </div>`;
+      });
+
+      html += '</div>';
+    });
+
+    container.innerHTML = html || '<div style="text-align:center;color:var(--text3);padding:20px">Tidak ada data bulan ini</div>';
+
+  } catch(err) {
+    container.innerHTML = '<div style="text-align:center;color:var(--red);padding:20px">Error: '+err.message+'</div>';
+    console.error(err);
+  }
+}
+
+// Init rekap outlet filter dropdown
+function initRekapOutletFilter() {
+  const sel = document.getElementById('rekap-outlet-filter');
+  if(!sel || sel.options.length > 1) return;
+  OUTLETS.forEach(o => {
+    const op = document.createElement('option');
+    op.value = o.nama; op.textContent = o.nama;
+    sel.appendChild(op);
+  });
+}
+
 // ===== GAJI CUSTOM =====
 async function saveGajiCustom(oi, ci, val) {
   const o = OUTLETS[oi];
@@ -1223,8 +1364,16 @@ async function exportExcel() {
     const data = await res.json();
 
     if(data.success && data.url) {
-      status.textContent = 'File siap! Membuka download... ✅';
-      window.open(data.url, '_blank');
+      status.textContent = 'File siap! ✅ Klik tombol di bawah untuk download';
+      // Buat link download yang bisa diklik
+      const dlBtn = document.createElement('a');
+      dlBtn.href = data.url;
+      dlBtn.target = '_blank';
+      dlBtn.rel = 'noopener';
+      dlBtn.textContent = '⬇️ Download Rekap Excel';
+      dlBtn.style.cssText = 'display:block;margin-top:8px;padding:10px;background:var(--green);color:white;border-radius:8px;text-align:center;font-weight:700;text-decoration:none;font-size:13px';
+      const statusEl = document.getElementById('export-status');
+      statusEl.appendChild(dlBtn);
     } else {
       status.textContent = 'Error: ' + (data.error || 'Gagal generate');
     }
@@ -1234,7 +1383,6 @@ async function exportExcel() {
   } finally {
     btn.disabled = false;
     btn.textContent = '📊 Generate & Download Excel';
-    setTimeout(() => { status.style.display='none'; }, 5000);
   }
 }
 
@@ -1535,7 +1683,8 @@ const SB_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJ
 
 // ===== SUPABASE HELPERS =====
 async function sbGet(table, params='') {
-  const res = await fetch(SB_URL+'/rest/v1/'+table+'?'+params, {
+  const separator = params ? '&' : '';
+  const res = await fetch(SB_URL+'/rest/v1/'+table+'?'+params+separator+'limit=1000', {
     headers: {'apikey': SB_KEY, 'Authorization': 'Bearer '+SB_KEY}
   });
   return res.json();
