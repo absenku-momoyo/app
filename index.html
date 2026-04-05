@@ -1162,10 +1162,11 @@ async function renderRekapBulanan() {
         else if(a.status==='alpha') alpha++;
         if(a.lembur_jam) lembur += parseInt(a.lembur_jam)||0;
       });
-      // Hari tanpa data = masuk (termasuk weekend)
+      // Hari tanpa data = masuk (hanya yang belum tercatat sama sekali)
       const totalTercatat = masuk+libur+cuti+alpha;
-      const sisaHari = hariMax - totalTercatat;
-      masuk += sisaHari; // hari tanpa data dianggap masuk
+      const sisaHari = Math.max(0, hariMax - totalTercatat);
+      masuk += sisaHari;
+      // TERHITUNG: alpha=0 → masuk+libur+cuti, alpha>0 → masuk+cuti (libur hangus)
       const terhitung = alpha===0 ? masuk+libur+cuti : masuk+cuti;
       const persen = Math.round((terhitung / hariMax) * 100);
       return {masuk, libur, cuti, alpha, lembur, terhitung, persen};
