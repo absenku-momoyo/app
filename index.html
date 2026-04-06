@@ -149,7 +149,10 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
     </div>
     <div id="wrap-outlet"><select class="input" id="login-outlet" onchange="loadCrew()" style="background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.5);color:var(--text)"><option value="">Pilih outlet...</option></select></div>
     <div id="wrap-crew" style="display:none"><select class="input" id="login-crew" style="background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.5);color:var(--text)"><option value="">Pilih nama kamu...</option></select></div>
+    <div id="wrap-pass-outlet" style="display:none"><input class="input" type="password" id="login-pass-outlet" placeholder="Password outlet..." style="background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.5);color:var(--text)" onkeydown="if(event.key==='Enter')doLogin()"/></div>
     <div id="wrap-nama" style="display:none"><input class="input" id="login-nama" placeholder="Nama owner..." style="background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.5);color:var(--text)"/></div>
+    <div id="wrap-pass-owner" style="display:none"><input class="input" type="password" id="login-pass-owner" placeholder="Password owner..." style="background:rgba(255,255,255,.95);border-color:rgba(255,255,255,.5);color:var(--text)" onkeydown="if(event.key==='Enter')doLogin()"/></div>
+    <div id="login-err" style="display:none;background:rgba(0,0,0,.3);color:white;font-size:12px;font-weight:600;padding:8px 12px;border-radius:var(--rs);text-align:center"></div>
     <button class="btn" onclick="doLogin()" style="background:white;color:var(--brand);font-weight:700;border-radius:var(--rs)">Masuk →</button>
   </div>
   <div style="font-size:11px;color:rgba(255,255,255,.6);text-align:center">GPS aktif di HP sungguhan</div>
@@ -414,6 +417,20 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
 
     <!-- PENGATURAN OUTLET -->
     <div id="settings-list"></div>
+
+    <!-- GANTI PASSWORD OUTLET -->
+    <div class="card" style="margin-top:10px;margin-bottom:10px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:10px">🔑 Password Outlet</div>
+      <div style="display:flex;gap:7px;margin-bottom:8px">
+        <select class="input" id="pass-outlet-sel" style="flex:1;margin-bottom:0">
+          <option value="">Pilih outlet...</option>
+        </select>
+      </div>
+      <div class="field" style="margin-bottom:8px">
+        <input class="input" type="password" id="pass-outlet-baru" placeholder="Password baru...">
+      </div>
+      <button class="btn btn-green" style="width:100%" onclick="simpanPasswordOutlet()">💾 Simpan Password</button>
+    </div>
   <nav class="bottom-nav">
     <button class="nav-i" onclick="ownerTab('home')"><span class="nav-ico">📊</span>Dashboard</button>
     <button class="nav-i" onclick="ownerTab('notif')"><span class="nav-ico">🔔</span>Notif</button>
@@ -818,29 +835,36 @@ function setRole(r){
   document.getElementById('rb-owner').className='role-btn'+(r==='owner'?' on':'');
   document.getElementById('wrap-outlet').style.display=r==='crew'?'block':'none';
   document.getElementById('wrap-crew').style.display='none';
+  document.getElementById('wrap-pass-outlet').style.display='none';
   document.getElementById('wrap-nama').style.display=r==='owner'?'block':'none';
+  document.getElementById('wrap-pass-owner').style.display=r==='owner'?'block':'none';
+  document.getElementById('login-err').style.display='none';
+  // Reset field
+  document.getElementById('login-pass-outlet').value='';
+  document.getElementById('login-pass-owner').value='';
 }
 
 async function loadCrew(){
   const val=document.getElementById('login-outlet').value;
   const sel=document.getElementById('login-crew');
   sel.innerHTML='<option value="">Memuat...</option>';
+  document.getElementById('wrap-pass-outlet').style.display='none';
+  document.getElementById('login-err').style.display='none';
   if(!val){document.getElementById('wrap-crew').style.display='none';return;}
   
   try {
     const crews = await sbGet('crew', 'outlet_nama=eq.'+encodeURIComponent(val)+'&aktif=eq.true&order=nama');
     sel.innerHTML='<option value="">Pilih nama kamu...</option>';
     if(crews && crews.length > 0) {
-      // Update crew di OUTLETS juga
       const o = OUTLETS.find(x=>x.nama===val);
       if(o) o.crew = crews.map(c=>({nama:c.nama, shift:c.shift||'pagi'}));
-      
       crews.forEach(c=>{
         const op=document.createElement('option');
         op.value=c.nama; op.textContent=c.nama;
         sel.appendChild(op);
       });
       document.getElementById('wrap-crew').style.display='block';
+      document.getElementById('wrap-pass-outlet').style.display='block';
     } else {
       sel.innerHTML='<option value="">Belum ada crew</option>';
       document.getElementById('wrap-crew').style.display='block';
@@ -851,12 +875,32 @@ async function loadCrew(){
   }
 }
 
+// Password owner — hash SHA-256 dari password yang disimpan di Script Properties
+// Untuk sekarang cek langsung ke Supabase tabel outlets (kolom password)
+const OWNER_PASSWORD = 'MomoyoOwner2026'; // ganti sesuai keinginan owner
+
 async function doLogin(){
+  const errEl = document.getElementById('login-err');
+  errEl.style.display='none';
+
   if(role==='crew'){
     const outletNama=document.getElementById('login-outlet').value;
     const nama=document.getElementById('login-crew').value;
-    if(!outletNama){showToast('Pilih outlet dulu!');return;}
-    if(!nama){showToast('Pilih namamu dulu!');return;}
+    const passOutlet=document.getElementById('login-pass-outlet').value.trim();
+    if(!outletNama){showLoginErr('Pilih outlet dulu!');return;}
+    if(!nama){showLoginErr('Pilih namamu dulu!');return;}
+    if(!passOutlet){showLoginErr('Masukkan password outlet!');return;}
+
+    // Cek password outlet dari Supabase
+    try {
+      const outlets = await sbGet('outlets', 'nama=eq.'+encodeURIComponent(outletNama)+'&select=password');
+      if(!outlets || outlets.length===0){showLoginErr('Outlet tidak ditemukan!');return;}
+      const correctPass = outlets[0].password || '';
+      if(passOutlet !== correctPass){showLoginErr('❌ Password salah!');return;}
+    } catch(e) {
+      showLoginErr('Gagal verifikasi, coba lagi');return;
+    }
+
     user={nama,outlet:outletNama,role:'crew'};
     const shift=getShift(outletNama,nama);
     document.getElementById('bar-nama').textContent=nama;
@@ -883,20 +927,24 @@ async function doLogin(){
           });
         }
       }
-    } catch(e) {
-      // Fallback ke localStorage
-      try{
-        var saved=localStorage.getItem('absen_'+nama+'_'+today());
-        if(saved){var s=JSON.parse(saved);var ex=ABSENSI.find(function(a){return a.nama===nama&&a.tgl===today();});if(!ex)ABSENSI.push({nama:nama,outlet:outletNama,status:s.status,clockIn:s.clockIn,clockOut:s.clockOut,tgl:today(),lemburJam:0,shift:s.shift||''});}
-      }catch(e2){}
-    }
+    } catch(e) {}
     crewTab('home'); renderRiwayat(); updateToday();
+
   } else {
+    const passOwner=document.getElementById('login-pass-owner').value.trim();
+    if(!passOwner){showLoginErr('Masukkan password owner!');return;}
+    if(passOwner !== OWNER_PASSWORD){showLoginErr('❌ Password owner salah!');return;}
     user={nama:document.getElementById('login-nama').value.trim()||'Owner',role:'owner'};
     document.getElementById('login-wrap').style.display='none';
     document.getElementById('main').style.display='flex';
     ownerTab('home'); renderOwnerDash(); renderOwnerNotif(); renderRekap(); renderSettings();
   }
+}
+
+function showLoginErr(msg) {
+  const el = document.getElementById('login-err');
+  el.textContent = msg;
+  el.style.display = 'block';
 }
 
 function doLogout(){
@@ -942,6 +990,7 @@ function ownerTab(t){
   if(t==='settings'){
     initInsentifDropdown();
     initRekapOutletFilter();
+    initPasswordOutletDropdown();
   }
 }
 
@@ -2221,6 +2270,30 @@ function selEdit(s){editStatus=s;renderEditPills();}
 function saveEdit(){ABSENSI[editIdx].status=editStatus;showToast('Status → '+editStatus+' ✓');closeModal('modal-edit');renderRekap();renderOwnerDash();}
 
 // ===== SETTINGS =====
+async function simpanPasswordOutlet() {
+  const outlet = document.getElementById('pass-outlet-sel').value;
+  const pass = document.getElementById('pass-outlet-baru').value.trim();
+  if(!outlet){showToast('Pilih outlet dulu!');return;}
+  if(!pass){showToast('Masukkan password baru!');return;}
+  const ok = await sbUpdate('outlets', {password: pass}, 'nama=eq.'+encodeURIComponent(outlet));
+  if(ok){
+    showToast('Password '+outlet.replace('Momoyo ','').replace('AI-CHA ','AICHA ')+' disimpan ✅');
+    document.getElementById('pass-outlet-baru').value='';
+  } else {
+    showToast('Gagal simpan, coba lagi!');
+  }
+}
+
+function initPasswordOutletDropdown() {
+  const sel = document.getElementById('pass-outlet-sel');
+  if(sel.options.length > 1) return;
+  OUTLETS.forEach(o => {
+    const op = document.createElement('option');
+    op.value = o.nama; op.textContent = o.nama;
+    sel.appendChild(op);
+  });
+}
+
 function renderSettings(){
   document.getElementById('settings-list').innerHTML=OUTLETS.map((o,i)=>`
     <div class="card" style="cursor:pointer" onclick="openOutletModal(${i})">
