@@ -1084,11 +1084,26 @@ function openClock(type){
 
 let currentFotoBase64='';
 
-// Buka kamera — reset value dulu supaya onchange selalu trigger
+// Buka kamera — cek dulu apakah ada kamera, baru buka
 function bukaBukaKamera() {
-  const inp = document.getElementById('file-foto');
-  inp.value = '';
-  inp.click();
+  // Cek apakah device punya kamera (mobile/tablet)
+  if (!navigator.mediaDevices || !navigator.mediaDevices.enumerateDevices) {
+    showToast('❌ Absensi hanya bisa dari HP, bukan PC!');
+    return;
+  }
+  navigator.mediaDevices.enumerateDevices().then(function(devices) {
+    const adaKamera = devices.some(d => d.kind === 'videoinput');
+    if (!adaKamera) {
+      showToast('❌ Absensi hanya bisa dari HP, bukan PC!');
+      return;
+    }
+    // Ada kamera → buka input file
+    const inp = document.getElementById('file-foto');
+    inp.value = '';
+    inp.click();
+  }).catch(function() {
+    showToast('❌ Absensi hanya bisa dari HP, bukan PC!');
+  });
 }
 
 function previewFoto(e){
