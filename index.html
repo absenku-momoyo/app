@@ -1048,27 +1048,60 @@ function renderRiwayat(){
 }
 
 // ===== PROFIL =====
-function renderProfil(){
-  const fd=FEB_RAW[user.nama];
-  if(!fd){document.getElementById('profil-stats').innerHTML='<div style="color:var(--text2);font-size:13px;grid-column:1/-1">Pilih Melany / Shanaz / Dadang / Faizatul untuk lihat data demo</div>';return;}
-  const terhitung=hitungTerhitung(fd);
-  const hasAlpha=fd.alpha>0;
+async function renderProfil(){
+  const now = new Date();
+  const bulan = now.getMonth()+1;
+  const tahun = now.getFullYear();
+  const bulanStr = String(bulan).padStart(2,'0');
+  const hariMax = new Date(tahun, bulan, 0).getDate();
+  const bulanNama = ['','Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember'][bulan];
+
+  document.getElementById('profil-stats').innerHTML='<div style="color:var(--text2);font-size:13px;grid-column:1/-1">⏳ Memuat data...</div>';
+
+  // Fetch absensi bulan ini dari Supabase
+  let absensi = [];
+  try {
+    absensi = await sbGet('absensi',
+      'nama=eq.'+encodeURIComponent(user.nama)+
+      '&tanggal=like.*%2F'+bulanStr+'%2F'+tahun+
+      '&order=tanggal&limit=200');
+  } catch(e) { absensi = []; }
+
+  // Hitung statistik
+  let masuk=0, libur=0, cuti=0, alpha=0, lemburHari=0, lemburJam=0;
+  const calMap = {};
+  absensi.forEach(a => {
+    const tgl = parseInt(a.tanggal.split('/')[0]);
+    if(a.status==='masuk'){masuk++;calMap[tgl]='masuk';}
+    else if(a.status==='lembur'){masuk++;lemburHari++;lemburJam+=parseInt(a.lembur_jam)||0;calMap[tgl]='lembur';}
+    else if(a.status==='libur'){libur++;calMap[tgl]='libur';}
+    else if(a.status==='cuti'){cuti++;calMap[tgl]='cuti';}
+    else if(a.status==='alpha'){alpha++;calMap[tgl]='alpha';}
+  });
+
+  const terhitung = alpha===0 ? masuk+libur+cuti : masuk+cuti;
+  const hasAlpha = alpha>0;
+  const totalTercatat = masuk+libur+cuti+alpha;
+  const pct = totalTercatat===0 ? 0 : Math.round(masuk/totalTercatat*100);
+
+  // Update label bulan di profil
+  const rekapEl = document.getElementById('rekap-bulan-label');
+  if(rekapEl) rekapEl.textContent = 'REKAP '+bulanNama.toUpperCase()+' '+tahun;
 
   document.getElementById('profil-stats').innerHTML=`
-    <div class="stat"><div class="stat-n" style="color:var(--green)">${fd.masuk}</div><div class="stat-l">Hari Masuk</div></div>
-    <div class="stat"><div class="stat-n" style="color:#7C3AED">${fd.libur}</div><div class="stat-l">Libur</div></div>
-    <div class="stat"><div class="stat-n" style="color:var(--red)">${fd.alpha}</div><div class="stat-l">Alpha</div></div>
-    <div class="stat"><div class="stat-n" style="color:var(--amber)">${fd.lemburHari}</div><div class="stat-l">Lembur (hari)</div></div>
+    <div class="stat"><div class="stat-n" style="color:var(--green)">${masuk}</div><div class="stat-l">Hari Masuk</div></div>
+    <div class="stat"><div class="stat-n" style="color:#7C3AED">${libur}</div><div class="stat-l">Libur</div></div>
+    <div class="stat"><div class="stat-n" style="color:var(--red)">${alpha}</div><div class="stat-l">Alpha</div></div>
+    <div class="stat"><div class="stat-n" style="color:var(--amber)">${lemburHari}</div><div class="stat-l">Lembur (hari)</div></div>
     <div class="stat" style="grid-column:span 2;background:${hasAlpha?'var(--red-bg)':'var(--green-bg)'};border-color:${hasAlpha?'#FCA5A5':'var(--green-light)'}">
-      <div class="stat-n" style="color:${hasAlpha?'var(--red)':'var(--green)'}">${terhitung} / 28</div>
+      <div class="stat-n" style="color:${hasAlpha?'var(--red)':'var(--green)'}">${terhitung} / ${totalTercatat}</div>
       <div class="stat-l" style="color:${hasAlpha?'var(--red)':'var(--green)'}">Terhitung Masuk</div>
     </div>`;
 
   document.getElementById('formula-box').innerHTML = hasAlpha
-    ? `⚠️ Ada alpha bulan ini → libur ${fd.libur} hari <b>hangus</b> (tidak dibayar)<br>Terhitung = masuk saja = <b>${fd.masuk}</b>`
-    : `✅ Tidak ada alpha → libur ${fd.libur} hari <b>dibayar</b><br>Terhitung = masuk + libur = ${fd.masuk} + ${fd.libur} = <b>${terhitung}</b>`;
+    ? `⚠️ Ada alpha → libur ${libur} hari <b>hangus</b><br>Terhitung = masuk = <b>${masuk}</b>`
+    : `✅ Tidak ada alpha → libur ${libur} hari <b>dibayar</b><br>Terhitung = ${masuk} + ${libur} = <b>${terhitung}</b>`;
 
-  const pct=Math.round(fd.masuk/28*100);
   document.getElementById('perf-bars').innerHTML=`
     <div class="perf-bar-row">
       <span style="font-size:12px;width:90px;color:var(--text2)">Kehadiran</span>
@@ -1077,19 +1110,19 @@ function renderProfil(){
     </div>
     <div class="perf-bar-row">
       <span style="font-size:12px;width:90px;color:var(--text2)">Lembur</span>
-      <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${Math.round(fd.lemburHari/fd.masuk*100)}%;background:#EAB308"></div></div>
-      <span style="font-size:12px;font-weight:700;color:var(--amber);width:36px;text-align:right">${fd.lemburHari}x</span>
+      <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${masuk>0?Math.min(Math.round(lemburHari/masuk*100),100):0}%;background:#EAB308"></div></div>
+      <span style="font-size:12px;font-weight:700;color:var(--amber);width:36px;text-align:right">${lemburHari}x</span>
     </div>
     <div class="perf-bar-row">
       <span style="font-size:12px;width:90px;color:var(--text2)">Terhitung</span>
-      <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${Math.round(terhitung/28*100)}%;background:${hasAlpha?'#DC2626':'#2563EB'}"></div></div>
-      <span style="font-size:12px;font-weight:700;color:${hasAlpha?'var(--red)':'var(--blue)'};width:36px;text-align:right">${terhitung}/28</span>
+      <div class="perf-bar-bg"><div class="perf-bar-fill" style="width:${totalTercatat>0?Math.round(terhitung/totalTercatat*100):0}%;background:${hasAlpha?'#DC2626':'#2563EB'}"></div></div>
+      <span style="font-size:12px;font-weight:700;color:${hasAlpha?'var(--red)':'var(--blue)'};width:36px;text-align:right">${terhitung}/${totalTercatat}</span>
     </div>`;
 
   const shift=getShift(user.outlet,user.nama);
   const jamPerHari=shift?(toMenit(shift.pulang)-toMenit(shift.masuk))/60:9;
-  document.getElementById('jam-kerja').textContent=Math.round(fd.masuk*jamPerHari)+'j';
-  document.getElementById('jam-lembur').textContent=fd.lemburHari+'j';
+  document.getElementById('jam-kerja').textContent=Math.round(masuk*jamPerHari)+'j';
+  document.getElementById('jam-lembur').textContent=lemburJam+'j';
   document.getElementById('terhitung-masuk').textContent=terhitung;
 
   // Legend
@@ -1103,18 +1136,19 @@ function renderProfil(){
       <span class="cal-cell ${l.cls}" style="width:16px;height:16px;border-radius:3px;aspect-ratio:auto;font-size:0">　</span>${l.label}
     </span>`).join('');
 
-  // Calendar
+  // Calendar bulan ini
   const hdr=['Min','Sen','Sel','Rab','Kam','Jum','Sab'];
   document.getElementById('cal-hdr').innerHTML=hdr.map(d=>`<div class="cal-hdr-cell">${d}</div>`).join('');
-  // 1 Feb 2026 = Minggu = kolom 0, tidak ada offset
-  const cal=FEB_CAL[user.nama]||{};
-  const clsMap={masuk:'cal-masuk',lembur:'cal-lembur',cuti:'cal-cuti',libur:'cal-libur',alpha:'cal-alpha',wknd:'cal-wknd',empty:'cal-empty'};
-  let cells=['<div></div>']; // placeholder untuk layout jika ada
-  // Feb 1 = Minggu (index 0), jadi langsung mulai tanpa offset
-  cells=[];
-  for(let d=1;d<=28;d++){
-    const st=cal[d]||'empty';
-    cells.push(`<div class="cal-cell ${clsMap[st]||'cal-empty'}">${d}</div>`);
+  const firstDay = new Date(tahun, bulan-1, 1).getDay();
+  const clsMap={masuk:'cal-masuk',lembur:'cal-lembur',cuti:'cal-cuti',libur:'cal-libur',alpha:'cal-alpha'};
+  let cells=[];
+  for(let i=0;i<firstDay;i++) cells.push('<div></div>');
+  for(let d=1;d<=hariMax;d++){
+    const dow=new Date(tahun,bulan-1,d).getDay();
+    const isWknd=dow===0||dow===6;
+    const st=calMap[d];
+    const cls=st?clsMap[st]:isWknd?'cal-wknd':'cal-empty';
+    cells.push(`<div class="cal-cell ${cls}">${d}</div>`);
   }
   document.getElementById('cal-grid').innerHTML=cells.join('');
 }
