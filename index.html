@@ -502,6 +502,44 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
   </div>
 </div>
 
+<!-- EDIT CREW MODAL -->
+<div class="modal-overlay" id="modal-edit-crew">
+  <div class="modal">
+    <div class="modal-handle"></div>
+    <div class="modal-title">✏️ Edit Data Crew</div>
+    <div style="font-size:12px;color:var(--text3);margin-bottom:12px" id="edit-crew-outlet-label"></div>
+
+    <div class="field">
+      <label class="lbl">Nama</label>
+      <input class="input" id="ec-nama" placeholder="Nama lengkap..." style="background:var(--surface2);color:var(--text3)" readonly>
+    </div>
+    <div class="field">
+      <label class="lbl">Tanggal Masuk Kerja</label>
+      <input class="input" type="date" id="ec-tgl-masuk">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Dipakai untuk hitung tier gaji otomatis</div>
+    </div>
+    <div class="field">
+      <label class="lbl">No. Rekening</label>
+      <input class="input" type="text" inputmode="numeric" id="ec-norek" placeholder="Contoh: 0812345678...">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px">Ketik manual, angka 0 di depan aman</div>
+    </div>
+    <div class="field">
+      <label class="lbl">Atas Nama Rekening</label>
+      <input class="input" id="ec-atas-nama" placeholder="Nama pemilik rekening...">
+    </div>
+    <div class="field">
+      <label class="lbl">Gaji Custom (Rp/hari)</label>
+      <input class="input" type="number" id="ec-gaji-custom" placeholder="Kosong = pakai tier otomatis">
+      <div style="font-size:11px;color:var(--text3);margin-top:4px" id="ec-tier-info"></div>
+    </div>
+
+    <div style="display:flex;gap:8px;margin-top:4px">
+      <button class="btn btn-outline" style="flex:1" onclick="closeModal('modal-edit-crew')">Batal</button>
+      <button class="btn btn-green" style="flex:1" id="btn-save-edit-crew" onclick="saveEditCrew()">💾 Simpan</button>
+    </div>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -2100,10 +2138,14 @@ function renderCrewList(i){
   document.getElementById('crew-list-settings').innerHTML=o.crew.length?o.crew.map((c,ci)=>`
     <div class="crew-item">
       <div class="avatar" style="width:30px;height:30px;font-size:10px">${inisial(c.nama)}</div>
-      <div style="flex:1;font-size:13px;font-weight:600">${c.nama}</div>
-      <select style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--rs);background:var(--bg);color:var(--text);margin-right:8px" onchange="OUTLETS[${i}].crew[${ci}].shift=this.value">
+      <div style="flex:1;min-width:0">
+        <div style="font-size:13px;font-weight:600">${c.nama}</div>
+        <div style="font-size:10px;color:var(--text3);margin-top:1px">${c.tanggal_masuk?'Masuk: '+c.tanggal_masuk:'-'} ${c.norek?'· Rek: '+c.norek:''}</div>
+      </div>
+      <select style="font-size:11px;padding:4px 8px;border:1px solid var(--border);border-radius:var(--rs);background:var(--bg);color:var(--text);margin-right:6px" onchange="OUTLETS[${i}].crew[${ci}].shift=this.value">
         ${o.shifts.map(s=>`<option value="${s.id}" ${c.shift===s.id?'selected':''}>${s.label}</option>`).join('')}
       </select>
+      <button onclick="openEditCrew(${i},${ci})" style="color:var(--blue);background:var(--blue-bg);border:none;border-radius:var(--rs);padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer;margin-right:4px">Edit</button>
       <button onclick="removeCrew(${i},${ci})" style="color:var(--red);background:var(--red-bg);border:none;border-radius:var(--rs);padding:5px 10px;font-size:12px;font-weight:700;cursor:pointer">Hapus</button>
     </div>
     <div style="display:flex;align-items:center;gap:6px;margin-top:4px;padding:0 4px">
@@ -2113,6 +2155,74 @@ function renderCrewList(i){
         style="flex:1;border:1px solid var(--border);border-radius:6px;padding:5px 8px;font-size:11px;background:var(--bg);color:var(--text)"
         onchange="saveGajiCustom(${i},${ci},this.value)">
     </div>`).join(''):'<div style="color:var(--text2);font-size:13px;padding:6px 0">Belum ada crew</div>';
+}
+
+// ===== EDIT CREW =====
+let _editCrewOi = -1, _editCrewCi = -1;
+
+function hitungTierInfo(tglMasuk, gajiCustom) {
+  if(gajiCustom) return 'Custom: Rp'+parseInt(gajiCustom).toLocaleString('id')+'/hari';
+  if(!tglMasuk) return 'Tier 3 (belum ada tgl masuk)';
+  const tgl = new Date(tglMasuk);
+  const now = new Date();
+  let y = now.getFullYear()-tgl.getFullYear();
+  let m = now.getMonth()-tgl.getMonth();
+  if(m<0){y--;m+=12;}
+  const masa = y+m/12;
+  let tier = 'Tier 3 (<1th1bln) · Rp60.000/hari';
+  if(masa>=2+7/12) tier='Tier 1 (≥2th7bln) · Rp75.000/hari';
+  else if(masa>=1+1/12) tier='Tier 2 (≥1th1bln) · Rp67.500/hari';
+  return tier+' · Masa: '+y+'th '+m+'bln';
+}
+
+function openEditCrew(oi, ci) {
+  _editCrewOi = oi; _editCrewCi = ci;
+  const c = OUTLETS[oi].crew[ci];
+  document.getElementById('edit-crew-outlet-label').textContent = OUTLETS[oi].nama;
+  document.getElementById('ec-nama').value = c.nama || '';
+  document.getElementById('ec-tgl-masuk').value = c.tanggal_masuk || '';
+  document.getElementById('ec-norek').value = c.norek || '';
+  document.getElementById('ec-atas-nama').value = c.atas_nama || '';
+  document.getElementById('ec-gaji-custom').value = c.gaji_custom || '';
+  document.getElementById('ec-tier-info').textContent = hitungTierInfo(c.tanggal_masuk, c.gaji_custom);
+  document.getElementById('ec-tgl-masuk').oninput = function() {
+    document.getElementById('ec-tier-info').textContent = hitungTierInfo(this.value, document.getElementById('ec-gaji-custom').value);
+  };
+  document.getElementById('ec-gaji-custom').oninput = function() {
+    document.getElementById('ec-tier-info').textContent = hitungTierInfo(document.getElementById('ec-tgl-masuk').value, this.value);
+  };
+  document.getElementById('modal-edit-crew').classList.add('show');
+}
+
+async function saveEditCrew() {
+  const oi = _editCrewOi, ci = _editCrewCi;
+  if(oi<0||ci<0) return;
+  const c = OUTLETS[oi].crew[ci];
+  const btn = document.getElementById('btn-save-edit-crew');
+  btn.disabled = true; btn.textContent = 'Menyimpan...';
+
+  const tglMasuk = document.getElementById('ec-tgl-masuk').value || null;
+  const norek = document.getElementById('ec-norek').value.trim() || null;
+  const atasNama = document.getElementById('ec-atas-nama').value.trim() || null;
+  const gajiCustom = parseInt(document.getElementById('ec-gaji-custom').value) || null;
+
+  const ok = await sbUpdate('crew',
+    {tanggal_masuk: tglMasuk, norek: norek, atas_nama: atasNama, gaji_custom: gajiCustom},
+    'nama=eq.'+encodeURIComponent(c.nama)+'&outlet_nama=eq.'+encodeURIComponent(OUTLETS[oi].nama)
+  );
+
+  if(ok) {
+    c.tanggal_masuk = tglMasuk;
+    c.norek = norek;
+    c.atas_nama = atasNama;
+    c.gaji_custom = gajiCustom;
+    showToast('Data '+c.nama+' disimpan ✅');
+    closeModal('modal-edit-crew');
+    renderCrewList(oi);
+  } else {
+    showToast('Gagal simpan, coba lagi!');
+  }
+  btn.disabled = false; btn.textContent = '💾 Simpan';
 }
 
 async function addCrew(){
