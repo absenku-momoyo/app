@@ -180,6 +180,7 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
       <div style="display:flex;flex-direction:column;gap:8px">
         <button class="btn btn-green" id="btn-ci" onclick="openClock('in')">🟢  Clock In — Saya Tiba</button>
         <button class="btn btn-redd" id="btn-co" onclick="openClock('out')" disabled>🔴  Clock Out — Saya Pulang</button>
+        <button class="btn" id="btn-libur" onclick="ambilLibur()" style="background:var(--purple-bg);color:var(--purple);border:1px solid var(--purple);display:none">📅  Ambil Libur Hari Ini</button>
       </div>
     </div>
     <div class="card"><div class="card-lbl">Riwayat 7 Hari</div><div id="riwayat-list"></div></div>
@@ -999,22 +1000,39 @@ function updateToday(){
   const a=ABSENSI.find(x=>x.nama===user.nama&&x.tgl===today());
   const el=document.getElementById('today-display');
   const ci=document.getElementById('btn-ci'), co=document.getElementById('btn-co');
-  if(!a){el.innerHTML='<span style="color:var(--text3)">Belum absen hari ini</span>';ci.disabled=false;co.disabled=true;}
-  else{
+  const btnLibur=document.getElementById('btn-libur');
+  const shift=getShift(user.outlet,user.nama);
+  const now=new Date();
+  const nowMenit=now.getHours()*60+now.getMinutes();
+  const dow=now.getDay(); // 0=Min, 6=Sab
+
+  if(!a){
+    el.innerHTML='<span style="color:var(--text3)">Belum absen hari ini</span>';
+    ci.disabled=false; co.disabled=true;
+    // Tampilkan tombol libur kalau Senin-Jumat dan belum ambil libur minggu ini
+    const bolehLibur = dow>=1 && dow<=5 && !sudahLiburMingguIni(user.nama,user.outlet);
+    if(btnLibur) btnLibur.style.display = bolehLibur ? 'block' : 'none';
+  } else {
+    // Hitung keterlambatan
+    let telatInfo = '';
+    if(a.clockIn && shift) {
+      const masukMenit = toMenit(shift.masuk);
+      const clockInMenit = toMenit(a.clockIn);
+      if(clockInMenit > masukMenit) {
+        const telatMenit = clockInMenit - masukMenit;
+        telatInfo = ` · <span style="color:var(--red);font-weight:700">Telat ${telatMenit} mnt</span>`;
+      }
+    }
     const lj=a.lemburJam>0?' · Lembur <b>'+a.lemburJam+' jam</b>':'';
-    el.innerHTML=`<span class="badge ${bc(a.status)}">${a.status}</span><div style="font-size:12px;color:var(--text2);margin-top:6px">Clock In: ${a.clockIn||'—'} | Clock Out: ${a.clockOut||'belum'}${lj}</div>`;
+    el.innerHTML=`<span class="badge ${bc(a.status)}">${a.status}</span><div style="font-size:12px;color:var(--text2);margin-top:6px">Clock In: ${a.clockIn||'—'}${telatInfo} | Clock Out: ${a.clockOut||'belum'}${lj}</div>`;
+    if(btnLibur) btnLibur.style.display='none';
     if(a.clockIn&&!a.clockOut){
       ci.disabled=true;
-      // Cek apakah sudah boleh clock out (30 menit sebelum jam pulang)
-      const shift=getShift(user.outlet,user.nama);
-      const now=new Date();
-      const nowMenit=now.getHours()*60+now.getMinutes();
       const pulangMenit=toMenit(shift?shift.pulang:'17:00');
       const bolehClockOut = nowMenit >= pulangMenit - 30;
       co.disabled=!bolehClockOut;
       if(!bolehClockOut){
-        const bolehJam=shift?shift.pulang:'17:00';
-        const bolehParts=bolehJam.split(':');
+        const bolehParts=(shift?shift.pulang:'17:00').split(':');
         const bolehM=parseInt(bolehParts[0])*60+parseInt(bolehParts[1])-30;
         const bH=String(Math.floor(bolehM/60)).padStart(2,'0');
         const bMin=String(bolehM%60).padStart(2,'0');
@@ -1024,6 +1042,32 @@ function updateToday(){
       }
     }
     else{ci.disabled=true;co.disabled=true;}
+  }
+}
+
+async function ambilLibur() {
+  const dow = new Date().getDay();
+  if(dow===0||dow===6){showToast('❌ Libur tidak bisa Sabtu/Minggu');return;}
+  if(sudahLiburMingguIni(user.nama,user.outlet)){showToast('❌ Sudah ambil libur minggu ini');return;}
+  // Cek tidak ada absensi hari ini
+  const existing = ABSENSI.find(x=>x.nama===user.nama&&x.tgl===today());
+  if(existing){showToast('❌ Sudah ada absensi hari ini');return;}
+
+  const shift=getShift(user.outlet,user.nama);
+  // Insert ke Supabase
+  const ok = await sbInsert('absensi', {
+    tanggal:today(), nama:user.nama, outlet_nama:user.outlet,
+    shift:shift?shift.label:'', clock_in:null, clock_out:null,
+    status:'libur', lembur_jam:0
+  });
+  if(ok){
+    ABSENSI.push({nama:user.nama,outlet:user.outlet,status:'libur',clockIn:null,clockOut:null,tgl:today(),lemburJam:0,shift:shift?shift.id:''});
+    // Kirim ke Sheets juga
+    kirimKeSheets({tipe:'libur',tanggal:today(),nama:user.nama,outlet:user.outlet,shift:shift?shift.label:'',status:'libur',lemburJam:0});
+    showToast('Libur dicatat ✅');
+    updateToday(); renderRiwayat();
+  } else {
+    showToast('Gagal, coba lagi!');
   }
 }
 
@@ -2105,6 +2149,16 @@ function submitClock(){
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
       });
       showToast('Clock in berhasil! '+jam+(perbantuanOutlet?' (Perbantuan)':'')+' ✅');
+      // Cek keterlambatan dan kirim notif ke Apps Script
+      if(shift) {
+        const masukMenit = toMenit(shift.masuk);
+        const clockInMenit = toMenit(jam);
+        if(clockInMenit > masukMenit) {
+          const telatMenit = clockInMenit - masukMenit;
+          kirimKeSheets({tipe:'telat', tanggal:today(), nama:user.nama, outlet:user.outlet,
+            shift:shift.label, clockIn:jam, telatMenit:telatMenit});
+        }
+      }
       currentFotoBase64='';
       closeModal('modal-clock'); updateToday(); renderRiwayat();
       btnSubmit.textContent = 'Simpan';
@@ -2129,6 +2183,16 @@ function submitClock(){
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
       });
       showToast('Clock in berhasil! '+jam+(perbantuanOutlet?' (Perbantuan)':'')+' ✅');
+      // Cek keterlambatan dan kirim notif ke Apps Script
+      if(shift) {
+        const masukMenit = toMenit(shift.masuk);
+        const clockInMenit = toMenit(jam);
+        if(clockInMenit > masukMenit) {
+          const telatMenit = clockInMenit - masukMenit;
+          kirimKeSheets({tipe:'telat', tanggal:today(), nama:user.nama, outlet:user.outlet,
+            shift:shift.label, clockIn:jam, telatMenit:telatMenit});
+        }
+      }
       currentFotoBase64='';
       closeModal('modal-clock'); updateToday(); renderRiwayat();
       btnSubmit.textContent = 'Simpan';
@@ -2298,7 +2362,21 @@ function renderEditPills(){
   document.getElementById('edit-pills').innerHTML=st.map(s=>`<button class="s-pill" style="${s===editStatus?sel[s]:''}" onclick="selEdit('${s}')"><span>${ic[s]}</span>${s}</button>`).join('');
 }
 function selEdit(s){editStatus=s;renderEditPills();}
-function saveEdit(){ABSENSI[editIdx].status=editStatus;showToast('Status → '+editStatus+' ✓');closeModal('modal-edit');renderRekap();renderOwnerDash();}
+async function saveEdit(){
+  const a = ABSENSI[editIdx];
+  // Update Supabase
+  const ok = await sbUpdate('absensi',
+    {status: editStatus},
+    'nama=eq.'+encodeURIComponent(a.nama)+'&tanggal=eq.'+a.tgl
+  );
+  if(ok){
+    ABSENSI[editIdx].status=editStatus;
+    showToast('Status → '+editStatus+' ✓');
+    closeModal('modal-edit'); renderRekap(); renderOwnerDash();
+  } else {
+    showToast('Gagal update, coba lagi!');
+  }
+}
 
 // ===== SETTINGS =====
 async function simpanPasswordOutlet() {
