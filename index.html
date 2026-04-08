@@ -327,10 +327,7 @@ select.input{appearance:none;background-image:url("data:image/svg+xml,%3Csvg xml
   <div class="scroll">
     <div style="display:flex;gap:7px;margin-bottom:8px">
       <select class="input" id="filter-outlet" style="flex:1;margin-bottom:0" onchange="renderRekap()"><option value="">Semua outlet</option></select>
-      <select class="input" id="filter-periode" style="flex:1;margin-bottom:0" onchange="renderRekap()">
-        <option value="hari">Hari ini</option>
-        <option value="bulan">Bulan ini</option>
-      </select>
+      <input class="input" type="date" id="filter-tanggal" style="flex:1;margin-bottom:0" onchange="renderRekap()">
     </div>
 
     <!-- Export Excel -->
@@ -2196,16 +2193,6 @@ function submitClock(){
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
       });
       showToast('Clock in berhasil! '+jam+(perbantuanOutlet?' (Perbantuan)':'')+' ✅');
-      // Cek keterlambatan dan kirim notif ke Apps Script
-      if(shift) {
-        const masukMenit = toMenit(shift.masuk);
-        const clockInMenit = toMenit(jam);
-        if(clockInMenit > masukMenit) {
-          const telatMenit = clockInMenit - masukMenit;
-          kirimKeSheets({tipe:'telat', tanggal:today(), nama:user.nama, outlet:user.outlet,
-            shift:shift.label, clockIn:jam, telatMenit:telatMenit});
-        }
-      }
       currentFotoBase64='';
       closeModal('modal-clock'); updateToday(); renderRiwayat();
       btnSubmit.textContent = 'Simpan';
@@ -2230,16 +2217,6 @@ function submitClock(){
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
       });
       showToast('Clock in berhasil! '+jam+(perbantuanOutlet?' (Perbantuan)':'')+' ✅');
-      // Cek keterlambatan dan kirim notif ke Apps Script
-      if(shift) {
-        const masukMenit = toMenit(shift.masuk);
-        const clockInMenit = toMenit(jam);
-        if(clockInMenit > masukMenit) {
-          const telatMenit = clockInMenit - masukMenit;
-          kirimKeSheets({tipe:'telat', tanggal:today(), nama:user.nama, outlet:user.outlet,
-            shift:shift.label, clockIn:jam, telatMenit:telatMenit});
-        }
-      }
       currentFotoBase64='';
       closeModal('modal-clock'); updateToday(); renderRiwayat();
       btnSubmit.textContent = 'Simpan';
@@ -2366,55 +2343,76 @@ function handleNotif(i,action){
 }
 
 // ===== REKAP =====
-function renderRekap(){
-  const fo=document.getElementById('filter-outlet').value;
-  const periode=document.getElementById('filter-periode').value;
+async function renderRekap(){
+  const fo = document.getElementById('filter-outlet').value;
+  const tglInput = document.getElementById('filter-tanggal').value;
+  const el = document.getElementById('rekap-list');
 
-  if(periode==='bulan'){
-    const outletNama=fo||'Momoyo Sumbersari';
-    const o=OUTLETS.find(x=>x.nama===outletNama);
-    if(!o){document.getElementById('rekap-list').innerHTML='<div style="color:var(--text2);font-size:13px">Pilih outlet</div>';return;}
-    let html=`<div class="card-lbl" style="margin-bottom:8px">Feb 2026 · ${outletNama.replace('Momoyo ','')}</div>
-      <table class="rt"><thead><tr><th>Nama</th><th>Masuk</th><th>Libur</th><th>Alpha</th><th>Lembur</th><th>Terhitung</th></tr></thead><tbody>`;
-    o.crew.forEach(c=>{
-      const fd=FEB_RAW[c.nama];
-      if(fd){
-        const t=hitungTerhitung(fd);
-        const hasA=fd.alpha>0;
-        html+=`<tr>
-          <td style="font-weight:600;font-size:12px">${c.nama.split(' ')[0]}</td>
-          <td><span style="color:var(--green);font-weight:700">${fd.masuk}</span></td>
-          <td><span style="color:#7C3AED;font-weight:700">${fd.libur}</span></td>
-          <td><span style="color:var(--red);font-weight:700">${fd.alpha}</span></td>
-          <td><span style="color:var(--amber);font-weight:700">${fd.lemburHari}j</span></td>
-          <td><span class="badge" style="background:${hasA?'var(--red-bg)':'var(--green-bg)'};color:${hasA?'var(--red)':'var(--green)'}">${t}/28</span></td>
-        </tr>`;
-      }
-    });
-    html+='</tbody></table>';
-    document.getElementById('rekap-list').innerHTML=html;
-    return;
+  // Default ke hari ini kalau belum dipilih
+  let tglFilter;
+  if(tglInput) {
+    const d = new Date(tglInput);
+    tglFilter = String(d.getDate()).padStart(2,'0')+'/'+String(d.getMonth()+1).padStart(2,'0')+'/'+d.getFullYear();
+  } else {
+    tglFilter = today();
+    // Set input ke hari ini
+    const now = new Date();
+    document.getElementById('filter-tanggal').value = now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');
   }
 
-  let data=ABSENSI.filter(a=>a.tgl===today());
-  if(fo) data=data.filter(a=>a.outlet===fo);
-  document.getElementById('rekap-list').innerHTML=
-    `<div class="card-lbl" style="margin-bottom:8px">${data.length} entri${fo?' · '+fo.replace('Momoyo ',''):''}</div>`+
-    (data.length?data.map(a=>{
-      const allShifts=OUTLETS.flatMap(o=>o.shifts);
-      const sh=a.shift?allShifts.find(s=>s.id===a.shift):null;
-      return `<div class="log-item">
-        <div class="avatar">${inisial(a.nama)}</div>
-        <div style="flex:1;min-width:0">
-          <div class="log-name">${a.nama}</div>
-          <div class="log-meta">${a.outlet.replace('Momoyo ','').replace('AI-CHA ','')}${sh?' · '+sh.label:''}${a.lemburJam>0?' · Lembur '+a.lemburJam+'j':''}</div>
-        </div>
-        <div class="log-right">
-          <span class="badge ${bc(a.status)}" style="cursor:pointer" onclick="openEdit(${ABSENSI.indexOf(a)})">${a.status} ✎</span>
-          <div class="mono">${a.clockIn||'—'} – ${a.clockOut||'...'}</div>
-        </div>
-      </div>`;
-    }).join(''):'<div style="color:var(--text2);font-size:13px;padding:.5rem">Belum ada data</div>');
+  el.innerHTML = '<div style="color:var(--text3);font-size:13px;padding:12px">⏳ Memuat...</div>';
+
+  try {
+    let params = 'tanggal=eq.'+tglFilter+'&order=outlet_nama,nama&limit=500';
+    if(fo) params += '&outlet_nama=eq.'+encodeURIComponent(fo);
+    const data = await sbGet('absensi', params);
+
+    // Sync ke ABSENSI array untuk openEdit
+    data.forEach(a => {
+      const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.tgl===tglFilter);
+      const obj = {
+        nama:a.nama, outlet:a.outlet_nama, status:a.status,
+        clockIn:a.clock_in, clockOut:a.clock_out,
+        tgl:tglFilter, lemburJam:a.lembur_jam||0, shift:a.shift||'',
+        _id: a.id
+      };
+      if(idx>=0) ABSENSI[idx]=obj; else ABSENSI.push(obj);
+    });
+
+    if(!data || data.length===0) {
+      el.innerHTML='<div style="color:var(--text2);font-size:13px;padding:.5rem">Belum ada data untuk tanggal ini</div>';
+      return;
+    }
+
+    const hariNama=['Minggu','Senin','Selasa','Rabu','Kamis','Jumat','Sabtu'];
+    const parts = tglFilter.split('/');
+    const dow = new Date(parseInt(parts[2]),parseInt(parts[1])-1,parseInt(parts[0])).getDay();
+    el.innerHTML =
+      `<div class="card-lbl" style="margin-bottom:8px">${data.length} entri · ${hariNama[dow]}, ${tglFilter}${fo?' · '+fo.replace('Momoyo ','').replace('AI-CHA ','AICHA '):''}</div>`+
+      data.map(a=>{
+        const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.tgl===tglFilter);
+        const shift = getShift(a.outlet_nama, a.nama, a.clock_in);
+        // Hitung telat
+        let telatInfo = '';
+        if(a.clock_in && shift) {
+          const mnt = toMenit(a.clock_in) - toMenit(shift.masuk);
+          if(mnt > 0) telatInfo = `<span style="color:var(--red);font-size:10px"> · Telat ${mnt}mnt</span>`;
+        }
+        return `<div class="log-item">
+          <div class="avatar">${inisial(a.nama)}</div>
+          <div style="flex:1;min-width:0">
+            <div class="log-name">${a.nama}</div>
+            <div class="log-meta">${(a.outlet_nama||'').replace('Momoyo ','').replace('AI-CHA ','AICHA ')}${a.lembur_jam>0?' · Lembur '+a.lembur_jam+'j':''}</div>
+          </div>
+          <div class="log-right">
+            <span class="badge ${bc(a.status)}" style="cursor:pointer" onclick="openEdit(${idx})">${a.status} ✎</span>
+            <div class="mono">${a.clock_in||'—'} – ${a.clock_out||'...'}${telatInfo}</div>
+          </div>
+        </div>`;
+      }).join('');
+  } catch(err) {
+    el.innerHTML='<div style="color:var(--red);font-size:13px;padding:.5rem">Error: '+err.message+'</div>';
+  }
 }
 
 function openEdit(idx){
