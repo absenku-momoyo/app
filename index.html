@@ -739,17 +739,27 @@ function toMenit(t){if(!t)return 0;const p=t.split(':');return parseInt(p[0])*60
 
 function getShift(outletNama, crewNama, jamOverride){
   const o=OUTLETS.find(x=>x.nama===outletNama); if(!o)return null;
-  // Tentukan shift otomatis dari jam — sebelum 13.00 = Pagi, 13.00+ = Siang
-  const jam = jamOverride || getJam();
+  // Kalau ada data absensi hari ini, pakai jam clock in untuk tentukan shift
+  let jam = jamOverride || getJam();
+  if(!jamOverride && crewNama) {
+    const absenHariIni = ABSENSI.find(a=>a.nama===crewNama&&a.tgl===today());
+    if(absenHariIni && absenHariIni.clockIn) jam = absenHariIni.clockIn;
+  }
   const jamInt = parseInt(jam.split(':')[0]);
   const isPagi = jamInt < 13;
-  // Cari shift yang sesuai
   const shiftId = isPagi ? 'pagi' : 'siang';
   return o.shifts.find(s=>s.id===shiftId) || o.shifts.find(s=>s.id.includes(isPagi?'pagi':'siang')) || o.shifts[0];
 }
 function shiftChipHTML(shift){
-  // Shift ditentukan dari jam sekarang — sebelum 13.00 = Pagi, 13.00+ = Siang
-  const jamInt = new Date().getHours();
+  // Kalau crew sudah clock in hari ini, shift ikut jam clock in
+  // Kalau belum, shift ikut jam sekarang
+  let jamInt = new Date().getHours();
+  if(user && user.nama) {
+    const absenHariIni = ABSENSI.find(a=>a.nama===user.nama&&a.tgl===today());
+    if(absenHariIni && absenHariIni.clockIn) {
+      jamInt = parseInt(absenHariIni.clockIn.split(':')[0]);
+    }
+  }
   const isPagi = jamInt < 13;
   const label = isPagi ? 'Pagi' : 'Siang';
   const masuk = isPagi ? '08:00' : '14:00';
