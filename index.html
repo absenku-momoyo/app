@@ -1318,6 +1318,7 @@ function togglePerbantuan(){
 
 function openClock(type){
   clockType=type; gpsReady=false; fotoReady=false; gpsValid=false; isPerbantuan=false;
+  currentFotoBase64=''; currentFotoJam='';
   const shift=getShift(user.outlet,user.nama);
   const o=OUTLETS.find(x=>x.nama===user.outlet);
   document.getElementById('clock-title').textContent=type==='in'?'Clock In — Saya Tiba':'Clock Out — Saya Pulang';
@@ -1348,6 +1349,7 @@ function openClock(type){
 }
 
 let currentFotoBase64='';
+let currentFotoJam='';
 let _kameraStream = null;
 let _facingMode = 'user'; // default kamera depan
 
@@ -1404,6 +1406,7 @@ function captureFoto() {
 
   // Watermark: nama + outlet + waktu + GPS
   const jam = getJam();
+  currentFotoJam = jam; // Simpan jam foto untuk dipakai saat Simpan
   const tgl = today();
   const gpsInfo = currentGPS ? currentGPS.lat.toFixed(4)+','+currentGPS.lng.toFixed(4) : 'GPS...';
   const label1 = user.nama + ' · ' + (user.outlet||'').replace('Momoyo ','').replace('AI-CHA ','AICHA ');
@@ -2184,7 +2187,7 @@ function submitClock(){
   btnSubmit.disabled = true;
   btnSubmit.textContent = 'Menyimpan...';
 
-  const jam=getJam();
+  const jam = currentFotoJam || getJam(); // Pakai jam saat foto diambil
   const shift=getShift(user.outlet,user.nama);
   const o=OUTLETS.find(x=>x.nama===user.outlet);
   let idx=ABSENSI.findIndex(a=>a.nama===user.nama&&a.tgl===today());
