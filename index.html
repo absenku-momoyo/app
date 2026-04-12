@@ -1194,20 +1194,21 @@ async function renderProfil(){
   document.getElementById('profil-stats').innerHTML=`
     <div class="stat"><div class="stat-n" style="color:var(--green)">${masuk}</div><div class="stat-l">Hari Masuk</div></div>
     <div class="stat"><div class="stat-n" style="color:#7C3AED">${libur}</div><div class="stat-l">Libur</div></div>
+    <div class="stat"><div class="stat-n" style="color:#2563EB">${cuti}</div><div class="stat-l">Cuti</div></div>
     <div class="stat"><div class="stat-n" style="color:var(--red)">${alpha}</div><div class="stat-l">Alpha</div></div>
     <div class="stat"><div class="stat-n" style="color:var(--amber)">${lemburHari}</div><div class="stat-l">Lembur (hari)</div></div>
     <div class="stat" style="background:${telat>0?'var(--red-bg)':'var(--surface)'};border-color:${telat>0?'#FCA5A5':'var(--border)'}">
       <div class="stat-n" style="color:${telat>0?'var(--red)':'var(--text3)'}">${telat}</div>
       <div class="stat-l">${telat>0?'Telat · '+totalTelatMenit+'mnt':'Telat'}</div>
     </div>
-    <div class="stat" style="background:${hasAlpha?'var(--red-bg)':'var(--green-bg)'};border-color:${hasAlpha?'#FCA5A5':'var(--green-light)'}">
+    <div class="stat" style="grid-column:span 2;background:${hasAlpha?'var(--red-bg)':'var(--green-bg)'};border-color:${hasAlpha?'#FCA5A5':'var(--green-light)'}">
       <div class="stat-n" style="color:${hasAlpha?'var(--red)':'var(--green)'}">${terhitung} / ${totalTercatat}</div>
       <div class="stat-l" style="color:${hasAlpha?'var(--red)':'var(--green)'}">Terhitung Masuk</div>
     </div>`;
 
   document.getElementById('formula-box').innerHTML = hasAlpha
-    ? `⚠️ Ada alpha → libur ${libur} hari <b>hangus</b><br>Terhitung = masuk = <b>${masuk}</b>`
-    : `✅ Tidak ada alpha → libur ${libur} hari <b>dibayar</b><br>Terhitung = ${masuk} + ${libur} = <b>${terhitung}</b>`;
+    ? `⚠️ Ada alpha → libur ${libur} hari <b>hangus</b><br>Terhitung = masuk + cuti = ${masuk} + ${cuti} = <b>${terhitung}</b>`
+    : `✅ Tidak ada alpha → libur & cuti dibayar<br>Terhitung = ${masuk} + ${libur} + ${cuti} = <b>${terhitung}</b>`;
 
   document.getElementById('perf-bars').innerHTML=`
     <div class="perf-bar-row">
@@ -1623,6 +1624,7 @@ async function renderRekapBulanan() {
           <div style="display:flex;gap:10px;font-size:11px;color:var(--text2)">
             <span>✓ Masuk: <b>${s.masuk}</b></span>
             <span>📅 Libur: <b>${s.libur}</b></span>
+            ${s.cuti > 0 ? `<span style="color:#2563EB">🌴 Cuti: <b>${s.cuti}</b></span>` : ''}
             ${s.alpha > 0 ? `<span style="color:#CC0000">⚠️ Alpha: <b>${s.alpha}</b></span>` : ''}
             ${s.lembur > 0 ? `<span style="color:#d97706">⏱ Lembur: <b>${s.lembur} jam</b></span>` : ''}
             ${s.telat > 0 ? `<span style="color:#CC0000">🕐 Telat: <b>${s.telat}x · ${s.totalTelatMenit} mnt</b></span>` : ''}
