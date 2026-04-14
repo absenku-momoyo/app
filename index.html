@@ -1394,7 +1394,7 @@ function tutupKamera() {
   document.getElementById('foto-box').style.display = 'flex';
 }
 
-function captureFoto() {
+async function captureFoto() {
   const video = document.getElementById('camera-video');
   const canvas = document.createElement('canvas');
   const MAX = 800;
@@ -1405,21 +1405,49 @@ function captureFoto() {
   const ctx = canvas.getContext('2d');
   ctx.drawImage(video, 0, 0, w, h);
 
-  // Watermark: nama + outlet + waktu + GPS
+  // Watermark: nama + outlet + waktu + GPS + alamat
   const jam = getJam();
-  currentFotoJam = jam; // Simpan jam foto untuk dipakai saat Simpan
+  currentFotoJam = jam;
   const tgl = today();
   const gpsInfo = currentGPS ? currentGPS.lat.toFixed(4)+','+currentGPS.lng.toFixed(4) : 'GPS...';
   const label1 = user.nama + ' · ' + (user.outlet||'').replace('Momoyo ','').replace('AI-CHA ','AICHA ');
   const label2 = tgl + ' ' + jam + ' · ' + gpsInfo;
-  const barH = 36;
-  ctx.fillStyle = 'rgba(0,0,0,0.62)';
+
+  // Fetch alamat dari OpenStreetMap Nominatim (gratis, no key)
+  let alamat = '';
+  if(currentGPS) {
+    try {
+      const resp = await fetch(
+        `https://nominatim.openstreetmap.org/reverse?lat=${currentGPS.lat}&lon=${currentGPS.lng}&format=json&addressdetails=1`,
+        {headers: {'Accept-Language': 'id'}}
+      );
+      const geo = await resp.json();
+      if(geo && geo.address) {
+        const a = geo.address;
+        const parts = [
+          a.road || a.pedestrian || a.footway || '',
+          a.suburb || a.village || a.neighbourhood || '',
+          a.city || a.town || a.municipality || '',
+        ].filter(Boolean);
+        alamat = parts.slice(0,3).join(', ');
+        if(alamat.length > 45) alamat = alamat.substring(0,45)+'...';
+      }
+    } catch(e) { alamat = ''; }
+  }
+
+  const barH = alamat ? 52 : 36;
+  ctx.fillStyle = 'rgba(0,0,0,0.65)';
   ctx.fillRect(0, h - barH, w, barH);
   ctx.fillStyle = 'white';
   ctx.font = 'bold 11px Arial';
   ctx.fillText(label1, 8, h - barH + 13);
   ctx.font = '10px Arial';
   ctx.fillText(label2, 8, h - barH + 27);
+  if(alamat) {
+    ctx.font = '9px Arial';
+    ctx.fillStyle = 'rgba(255,255,255,0.85)';
+    ctx.fillText('📍 ' + alamat, 8, h - barH + 43);
+  }
 
   const compressed = canvas.toDataURL('image/jpeg', 0.75);
   currentFotoBase64 = compressed.split(',')[1] || '';
