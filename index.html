@@ -762,29 +762,44 @@ function toMenit(t){if(!t)return 0;const p=t.split(':');return parseInt(p[0])*60
 
 function getShift(outletNama, crewNama, jamOverride){
   const o=OUTLETS.find(x=>x.nama===outletNama); if(!o)return null;
-  // Shift ditentukan dari JAM CLOCK IN
-  // ≤ 08:30 = pagi, ≥ 13:30 = siang
+
+  // PRIORITAS 1: shift dari master data crew (source of truth)
+  if(crewNama && o.crew) {
+    const crewData = o.crew.find(c => c.nama === crewNama);
+    if(crewData && crewData.shift) {
+      // Exact match dulu (misal 'pagi', 'siang', 'pagi-wd', 'siang-we')
+      const exact = o.shifts.find(s => s.id === crewData.shift);
+      if(exact) return exact;
+      // Fallback: match prefix pagi* atau siang* (untuk outlet Batu weekday/weekend)
+      const prefix = crewData.shift.toLowerCase().startsWith('siang') ? 'siang' : 'pagi';
+      const byPrefix = o.shifts.find(s => s.id.toLowerCase().startsWith(prefix));
+      if(byPrefix) return byPrefix;
+    }
+  }
+
+  // PRIORITAS 2 (fallback): tebak dari jam kalau crew tidak ditemukan di master
+  // Pakai threshold 12:00 (tengah hari) sebagai pemisah pagi/siang
   let jam = jamOverride || getJam();
   if(!jamOverride && crewNama) {
     const absenHariIni = ABSENSI.find(a=>a.nama===crewNama&&a.tgl===today());
     if(absenHariIni && absenHariIni.clockIn) jam = absenHariIni.clockIn;
   }
   const totalMnt = toMenit(jam);
-  const isPagi = totalMnt <= 8*60+30;
-  const shiftId = isPagi ? 'pagi' : 'siang';
+  const shiftId = totalMnt >= 12*60 ? 'siang' : 'pagi';
   return o.shifts.find(s=>s.id===shiftId) || o.shifts[0];
 }
 function shiftChipHTML(shift){
-  // Shift dari jam clock in kalau sudah absen, atau jam sekarang kalau belum
-  let totalMnt = new Date().getHours()*60 + new Date().getMinutes();
-  if(user && user.nama) {
-    const absenHariIni = ABSENSI.find(a=>a.nama===user.nama&&a.tgl===today());
-    if(absenHariIni && absenHariIni.clockIn) totalMnt = toMenit(absenHariIni.clockIn);
+  // Pakai shift object yang dipasok (hasil getShift) sebagai source of truth.
+  // Kalau shift tidak ada, fallback ke getShift dari user aktif.
+  let s = shift;
+  if(!s && user && user.outlet && user.nama) {
+    s = getShift(user.outlet, user.nama);
   }
-  const isPagi = totalMnt <= 8*60+30;
+  if(!s) return '';
+  const isPagi = (s.id||'').toLowerCase().startsWith('pagi');
   const label = isPagi ? 'Pagi' : 'Siang';
-  const masuk = isPagi ? '08:00' : '14:00';
-  const pulang = isPagi ? '17:00' : '22:00';
+  const masuk = s.masuk || (isPagi ? '08:00' : '14:00');
+  const pulang = s.pulang || (isPagi ? '17:00' : '22:00');
   const col = isPagi ? 'var(--blue)' : 'var(--purple)';
   const bg = isPagi ? 'var(--blue-bg)' : 'var(--purple-bg)';
   return `<span class="shift-chip" style="background:${bg};color:${col}">${isPagi?'☀️':'🌙'} ${label} · ${masuk}–${pulang}</span>`;
@@ -1044,11 +1059,11 @@ function updateToday(){
     const bolehLibur = dow>=1 && dow<=5 && !sudahLiburMingguIni(user.nama,user.outlet);
     if(btnLibur) btnLibur.style.display = bolehLibur ? 'block' : 'none';
   } else {
-    // Hitung keterlambatan - pakai jam clock in
+    // Hitung keterlambatan - pakai shift dari master crew (via getShift), bukan tebak jam
     let telatInfo = '';
     if(a.clockIn) {
-      const ciMntToday = toMenit(a.clockIn);
-      const shiftMasuk = ciMntToday >= 13*60+30 ? '14:00' : '08:00';
+      const shiftMasuk = (shift && shift.masuk) ? shift.masuk
+                      : ((shift && (shift.id||'').toLowerCase().startsWith('siang')) ? '14:00' : '08:00');
       const telatMenit = toMenit(a.clockIn) - toMenit(shiftMasuk);
       if(telatMenit > 0) {
         telatInfo = ` · <span style="color:var(--red);font-weight:700">Telat ${telatMenit} mnt</span>`;
@@ -1156,11 +1171,10 @@ async function renderProfil(){
     else if(a.status==='libur'){libur++;calMap[tgl]='libur';}
     else if(a.status==='cuti'){cuti++;calMap[tgl]='cuti';}
     else if(a.status==='alpha'){alpha++;calMap[tgl]='alpha';}
-    // Hitung telat - pakai shift dari data absensi
+    // Hitung telat - pakai field shift dari row absensi
     if(a.clock_in) {
-      // Shift dari field shift di data absensi
-      const ciMntX = toMenit(a.clock_in||'08:00');
-      const shiftMasuk = ciMntX >= 13*60+30 ? '14:00' : '08:00';
+      const shiftLower = (a.shift||'').toLowerCase();
+      const shiftMasuk = shiftLower.includes('siang') ? '14:00' : '08:00';
       const mntTelat = toMenit(a.clock_in) - toMenit(shiftMasuk);
       if(mntTelat > 0) { telat++; totalTelatMenit += mntTelat; }
     }
@@ -1612,10 +1626,10 @@ async function renderRekapBulanan() {
         else if(a.status==='cuti') cuti++;
         else if(a.status==='alpha') alpha++;
         if(a.lembur_jam) lembur += parseInt(a.lembur_jam)||0;
-        // Hitung telat - pakai jam clock in
+        // Hitung telat - pakai field shift dari row absensi (source of truth setelah fix)
         if(a.clock_in) {
-          const ciMntRekap = toMenit(a.clock_in);
-          const shiftMasuk = ciMntRekap >= 13*60+30 ? '14:00' : '08:00';
+          const shiftLower = (a.shift||'').toLowerCase();
+          const shiftMasuk = shiftLower.includes('siang') ? '14:00' : '08:00';
           const mntTelat = toMenit(a.clock_in) - toMenit(shiftMasuk);
           if(mntTelat > 0) { telat++; totalTelatMenit += mntTelat; }
         }
@@ -2268,7 +2282,8 @@ function submitClock(){
         outletAsal:user.outlet, perbantuanKe:perbantuanOutlet});
       sbInsert('absensi', {
         tanggal:today(), nama:user.nama, outlet_nama:user.outlet,
-        shift:toMenit(jam)>=13*60+30?'Siang':'Pagi', clock_in:jam, clock_out:null,
+        shift: shift && (shift.id||'').toLowerCase().startsWith('siang') ? 'Siang' : 'Pagi',
+        clock_in:jam, clock_out:null,
         gps_lat:currentGPS?currentGPS.lat:null, gps_lng:currentGPS?currentGPS.lng:null,
         jarak:jarakCI||null, status:'masuk', lembur_jam:0,
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
@@ -2292,7 +2307,8 @@ function submitClock(){
         outletAsal:user.outlet, perbantuanKe:perbantuanOutlet});
       sbInsert('absensi', {
         tanggal:today(), nama:user.nama, outlet_nama:user.outlet,
-        shift:toMenit(jam)>=13*60+30?'Siang':'Pagi', clock_in:jam, clock_out:null,
+        shift: shift && (shift.id||'').toLowerCase().startsWith('siang') ? 'Siang' : 'Pagi',
+        clock_in:jam, clock_out:null,
         gps_lat:currentGPS?currentGPS.lat:null, gps_lng:currentGPS?currentGPS.lng:null,
         jarak:jarakCI||null, status:'masuk', lembur_jam:0,
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
@@ -2344,11 +2360,11 @@ function renderOwnerDash(){
   const lembur=ABSENSI.filter(a=>a.status==='lembur'&&a.tgl===today()).length;
   const cuti=ABSENSI.filter(a=>a.status==='cuti'&&a.tgl===today()).length;
 
-  // Hitung telat hari ini
+  // Hitung telat hari ini - pakai field shift dari row absensi
   const telatList = ABSENSI.filter(a=>{
     if(a.tgl!==today()||!a.clockIn) return false;
-    const ciMntDash = toMenit(a.clockIn||'08:00');
-    const shiftMasuk = ciMntDash >= 13*60+30 ? '14:00' : '08:00';
+    const shiftLower = (a.shift||'').toLowerCase();
+    const shiftMasuk = shiftLower.includes('siang') ? '14:00' : '08:00';
     return toMenit(a.clockIn) > toMenit(shiftMasuk);
   });
 
