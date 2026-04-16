@@ -612,10 +612,10 @@ let OUTLETS = [
     {nama:"Giska Fitria",shift:'pagi'},{nama:"Yeni Rahmawat",shift:'siang'},
     {nama:"Shiendy Leony Lukito Pratama",shift:'pagi'}]},
   {id:6, nama:"Momoyo Pajajaran",    lat:-7.9757246, lng:112.6360922, radius:500, isBatu:false, shifts:JSON.parse(JSON.stringify(SH_STD)), crew:[
-    {nama:"Icha Luky Trianissa",shift:'pagi'},{nama:"Joananta",shift:'siang'},
-    {nama:"Niken Ayunda Dewi",shift:'pagi'},{nama:"Mirza Fabian Saputra",shift:'siang'},
-    {nama:"Shevalina",shift:'pagi'},{nama:"Siti Maulidiah",shift:'siang'},
-    {nama:"Julia Wahyu Imaniar",shift:'pagi'},{nama:"Dela Kurnia W",shift:'siang'}]},
+    {nama:"Icha Luky Trianissa",shift:'pagi'},{nama:"Joananta Achmad Fradana",shift:'siang'},
+    {nama:"Niken Ayunda Dewi",shift:'pagi'},{nama:"Mirza Fabiansyah Putra",shift:'siang'},
+    {nama:"Shevalina Rahmadewi",shift:'pagi'},{nama:"Julia Wahyu Imaniar",shift:'pagi'},
+    {nama:"Dela kurnia W",shift:'pagi'}]},
   {id:7, nama:"Momoyo Sukun",        lat:-7.9967432, lng:112.6192921, radius:500, isBatu:false, shifts:JSON.parse(JSON.stringify(SH_STD)), crew:[
     {nama:"Siska",shift:'pagi'},{nama:"Raka Prasetya",shift:'siang'},
     {nama:"Nurhabibah Maysaroh",shift:'pagi'},{nama:"Brilian",shift:'siang'}]},
@@ -763,7 +763,8 @@ function toMenit(t){if(!t)return 0;const p=t.split(':');return parseInt(p[0])*60
 function getShift(outletNama, crewNama, jamOverride){
   const o=OUTLETS.find(x=>x.nama===outletNama); if(!o)return null;
 
-  // Prioritas 1: pakai shift dari data crew di OUTLETS
+  // Shift dari kolom shift di tabel crew (pagi/siang)
+  // Crew bisa clock in lebih awal dari jam masuk tanpa dianggap telat
   if(crewNama && !jamOverride) {
     const crewData = o.crew.find(c=>c.nama===crewNama);
     if(crewData && crewData.shift) {
@@ -772,27 +773,18 @@ function getShift(outletNama, crewNama, jamOverride){
     }
   }
 
-  // Fallback: tebak dari jam (untuk kasus jamOverride atau crew tidak ditemukan)
+  // Fallback: pakai jam (untuk jamOverride atau crew tidak ditemukan di cache)
   let jam = jamOverride || getJam();
-  const jamInt = parseInt(jam.split(':')[0]);
-  const jamMnt = parseInt(jam.split(':')[1])||0;
-  const isPagi = jamInt < 13 || (jamInt === 13 && jamMnt < 30);
+  const totalMnt = toMenit(jam);
+  const isPagi = totalMnt < 13*60+30;
   const shiftId = isPagi ? 'pagi' : 'siang';
   return o.shifts.find(s=>s.id===shiftId) || o.shifts[0];
 }
 function shiftChipHTML(shift){
-  // Kalau crew sudah clock in hari ini, shift ikut jam clock in
-  // Kalau belum, shift ikut jam sekarang
-  let jamInt = new Date().getHours();
-  let jamMntChip = new Date().getMinutes();
-  if(user && user.nama) {
-    const absenHariIni = ABSENSI.find(a=>a.nama===user.nama&&a.tgl===today());
-    if(absenHariIni && absenHariIni.clockIn) {
-      jamInt = parseInt(absenHariIni.clockIn.split(':')[0]);
-      jamMntChip = parseInt(absenHariIni.clockIn.split(':')[1])||0;
-    }
-  }
-  const isPagi = jamInt < 13 || (jamInt === 13 && jamMntChip < 30);
+  // Shift dari data crew di DB
+  const crewData = user && user.nama ? OUTLETS.find(o=>o.nama===user.outlet)?.crew?.find(c=>c.nama===user.nama) : null;
+  const shiftId = crewData ? crewData.shift : 'pagi';
+  const isPagi = !shiftId.includes('siang');
   const label = isPagi ? 'Pagi' : 'Siang';
   const masuk = isPagi ? '08:00' : '14:00';
   const pulang = isPagi ? '17:00' : '22:00';
@@ -1058,6 +1050,7 @@ function updateToday(){
     // Hitung keterlambatan - pakai shift dari data absensi
     let telatInfo = '';
     if(a.clockIn) {
+      // Shift dari field shift di data absensi
       const shiftData = (a.shift||'').toLowerCase();
       const shiftMasuk = shiftData.includes('siang') ? '14:00' : '08:00';
       const telatMenit = toMenit(a.clockIn) - toMenit(shiftMasuk);
@@ -1169,6 +1162,7 @@ async function renderProfil(){
     else if(a.status==='alpha'){alpha++;calMap[tgl]='alpha';}
     // Hitung telat - pakai shift dari data absensi
     if(a.clock_in) {
+      // Shift dari field shift di data absensi
       const shiftData = (a.shift||'').toLowerCase();
       const shiftMasuk = shiftData.includes('siang') ? '14:00' : '08:00';
       const mntTelat = toMenit(a.clock_in) - toMenit(shiftMasuk);
@@ -2264,7 +2258,7 @@ function submitClock(){
         outletAsal:user.outlet, perbantuanKe:perbantuanOutlet});
       sbInsert('absensi', {
         tanggal:today(), nama:user.nama, outlet_nama:user.outlet,
-        shift:shift?shift.label:'', clock_in:jam, clock_out:null,
+        shift:shift?shift.label:'Pagi', clock_in:jam, clock_out:null,
         gps_lat:currentGPS?currentGPS.lat:null, gps_lng:currentGPS?currentGPS.lng:null,
         jarak:jarakCI||null, status:'masuk', lembur_jam:0,
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
@@ -2288,7 +2282,7 @@ function submitClock(){
         outletAsal:user.outlet, perbantuanKe:perbantuanOutlet});
       sbInsert('absensi', {
         tanggal:today(), nama:user.nama, outlet_nama:user.outlet,
-        shift:shift?shift.label:'', clock_in:jam, clock_out:null,
+        shift:shift?shift.label:'Pagi', clock_in:jam, clock_out:null,
         gps_lat:currentGPS?currentGPS.lat:null, gps_lng:currentGPS?currentGPS.lng:null,
         jarak:jarakCI||null, status:'masuk', lembur_jam:0,
         outlet_asal:user.outlet, perbantuan_ke:perbantuanOutlet||null
