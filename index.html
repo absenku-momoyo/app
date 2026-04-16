@@ -1403,7 +1403,16 @@ async function captureFoto() {
   if(h > MAX){ w = Math.round(w*MAX/h); h = MAX; }
   canvas.width = w; canvas.height = h;
   const ctx = canvas.getContext('2d');
+
+  // Flip horizontal kalau kamera depan (mirror fix)
+  if(_facingMode === 'user') {
+    ctx.translate(w, 0);
+    ctx.scale(-1, 1);
+  }
   ctx.drawImage(video, 0, 0, w, h);
+  if(_facingMode === 'user') {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); // reset transform
+  }
 
   // Watermark: nama + outlet + waktu + GPS + alamat
   const jam = getJam();
