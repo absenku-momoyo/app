@@ -2436,13 +2436,6 @@ async function renderRekap(){
       `<div class="card-lbl" style="margin-bottom:8px">${data.length} entri · ${hariNama[dow]}, ${tglFilter}${fo?' · '+fo.replace('Momoyo ','').replace('AI-CHA ','AICHA '):''}</div>`+
       data.map(a=>{
         const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.tgl===tglFilter);
-        const shift = getShift(a.outlet_nama, a.nama, a.clock_in);
-        // Hitung telat
-        let telatInfo = '';
-        if(a.clock_in && shift) {
-          const mnt = toMenit(a.clock_in) - toMenit(shift.masuk);
-          if(mnt > 0) telatInfo = `<span style="color:var(--red);font-size:10px"> · Telat ${mnt}mnt</span>`;
-        }
         return `<div class="log-item">
           <div class="avatar">${inisial(a.nama)}</div>
           <div style="flex:1;min-width:0">
@@ -2451,7 +2444,7 @@ async function renderRekap(){
           </div>
           <div class="log-right">
             <span class="badge ${bc(a.status)}" style="cursor:pointer" onclick="openEdit(${idx})">${a.status} ✎</span>
-            <div class="mono">${a.clock_in||'—'} – ${a.clock_out||'...'}${telatInfo}</div>
+            <div class="mono">${a.clock_in||'—'} – ${a.clock_out||'...'}</div>
           </div>
         </div>`;
       }).join('');
