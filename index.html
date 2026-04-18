@@ -986,7 +986,9 @@ async function doLogin(){
     // Load absensi hari ini dari Supabase
     try {
       const todayAbsen = await sbGet('absensi',
-        'nama=eq.'+encodeURIComponent(nama)+'&tanggal=eq.'+today()+'&order=created_at.desc&limit=1');
+        'nama=eq.'+encodeURIComponent(nama)+
+        '&outlet_nama=eq.'+encodeURIComponent(outletNama)+
+        '&tanggal=eq.'+today()+'&order=created_at.desc&limit=1');
       if(todayAbsen && todayAbsen.length > 0) {
         const a = todayAbsen[0];
         const existing = ABSENSI.find(x=>x.nama===nama&&x.tgl===today());
@@ -1111,9 +1113,23 @@ async function ambilLibur() {
   const dow = new Date().getDay();
   if(dow===0||dow===6){showToast('❌ Libur tidak bisa Sabtu/Minggu');return;}
   if(sudahLiburMingguIni(user.nama,user.outlet)){showToast('❌ Sudah ambil libur minggu ini');return;}
-  // Cek tidak ada absensi hari ini
+  // Cek tidak ada absensi hari ini (in-memory)
   const existing = ABSENSI.find(x=>x.nama===user.nama&&x.tgl===today());
   if(existing){showToast('❌ Sudah ada absensi hari ini');return;}
+
+  // Cek ulang di DB untuk cegah duplikat (race condition: multi-device, double-tap, network lag)
+  try {
+    const existingDb = await sbGet('absensi',
+      'nama=eq.'+encodeURIComponent(user.nama)+
+      '&outlet_nama=eq.'+encodeURIComponent(user.outlet)+
+      '&tanggal=eq.'+today());
+    if(existingDb && existingDb.length > 0) {
+      showToast('❌ Sudah ada absensi hari ini di DB');
+      return;
+    }
+  } catch(e) {
+    // Kalau cek gagal (offline?), tetap lanjut — server side constraint harus jadi safety net
+  }
 
   const shift=getShift(user.outlet,user.nama);
   // Insert ke Supabase
@@ -1139,6 +1155,7 @@ async function renderRiwayat(){
   try {
     const data = await sbGet('absensi',
       'nama=eq.'+encodeURIComponent(user.nama)+
+      '&outlet_nama=eq.'+encodeURIComponent(user.outlet)+
       '&order=tanggal.desc&limit=7');
     if(!data || data.length===0){
       el.innerHTML='<div style="color:var(--text3);font-size:12px;padding:8px">Belum ada riwayat</div>';
@@ -1173,6 +1190,7 @@ async function renderProfil(){
   try {
     absensi = await sbGet('absensi',
       'nama=eq.'+encodeURIComponent(user.nama)+
+      '&outlet_nama=eq.'+encodeURIComponent(user.outlet)+
       '&tanggal=like.*%2F'+bulanStr+'%2F'+tahun+
       '&order=tanggal&limit=200');
   } catch(e) { absensi = []; }
@@ -2262,7 +2280,9 @@ function submitClock(){
   let idx=ABSENSI.findIndex(a=>a.nama===user.nama&&a.tgl===today());
   if(clockType==='in'){
     // Cek duplikat di Supabase dulu sebelum insert
-    sbGet('absensi', 'nama=eq.'+encodeURIComponent(user.nama)+'&tanggal=eq.'+today()).then(existing => {
+    sbGet('absensi', 'nama=eq.'+encodeURIComponent(user.nama)+
+      '&outlet_nama=eq.'+encodeURIComponent(user.outlet)+
+      '&tanggal=eq.'+today()).then(existing => {
       if(existing && existing.length > 0) {
         showToast('⚠️ Kamu sudah clock in hari ini!');
         btnSubmit.textContent = 'Simpan';
@@ -2345,7 +2365,9 @@ function submitClock(){
       gps_lng:currentGPS?currentGPS.lng:null, jarak:jarakCO||null,
       status:statusFinal, lembur_jam:lj,
       perbantuan_ke:perbantuanOutletCO||null
-    }, 'nama=eq.'+encodeURIComponent(user.nama)+'&tanggal=eq.'+today()+'&clock_out=is.null');
+    }, 'nama=eq.'+encodeURIComponent(user.nama)+
+       '&outlet_nama=eq.'+encodeURIComponent(user.outlet)+
+       '&tanggal=eq.'+today()+'&clock_out=is.null');
     if(lj>0) showToast('Lembur '+lj+' jam! Pulang '+jam+' 🕐');
     else showToast('Clock out berhasil! Pulang '+jam+' ✅');
     try{ localStorage.setItem('absen_'+user.nama+'_'+today(), JSON.stringify({clockIn:ABSENSI[idx].clockIn,clockOut:jam,status:statusFinal,outlet:user.outlet,shift:shift?shift.id:''})); }catch(e){}
@@ -2411,7 +2433,7 @@ function renderOwnerNotif(){
 
 function handleNotif(i,action){
   const n=NOTIFS[i];
-  const a=ABSENSI.find(x=>x.nama===n.nama&&x.tgl===today());
+  const a=ABSENSI.find(x=>x.nama===n.nama&&x.outlet===n.outlet&&x.tgl===today());
   const stMap={'lupa-clockout':'masuk','cuti':'cuti','izin-sakit':'cuti','izin-keperluan':'cuti'};
   if(action==='ok'){
     if(a) a.status=stMap[n.tipe]||'cuti';
@@ -2451,7 +2473,8 @@ async function renderRekap(){
 
     // Sync ke ABSENSI array untuk openEdit
     data.forEach(a => {
-      const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.tgl===tglFilter);
+      // Match by nama + outlet + tgl supaya homonim antar outlet tidak saling overwrite
+      const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.outlet===a.outlet_nama&&x.tgl===tglFilter);
       const obj = {
         nama:a.nama, outlet:a.outlet_nama, status:a.status,
         clockIn:a.clock_in, clockOut:a.clock_out,
@@ -2472,7 +2495,7 @@ async function renderRekap(){
     el.innerHTML =
       `<div class="card-lbl" style="margin-bottom:8px">${data.length} entri · ${hariNama[dow]}, ${tglFilter}${fo?' · '+fo.replace('Momoyo ','').replace('AI-CHA ','AICHA '):''}</div>`+
       data.map(a=>{
-        const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.tgl===tglFilter);
+        const idx = ABSENSI.findIndex(x=>x.nama===a.nama&&x.outlet===a.outlet_nama&&x.tgl===tglFilter);
         return `<div class="log-item">
           <div class="avatar">${inisial(a.nama)}</div>
           <div style="flex:1;min-width:0">
@@ -2532,7 +2555,9 @@ async function saveEdit(){
   if(newLembur !== undefined) updateData.lembur_jam = newLembur;
 
   const ok = await sbUpdate('absensi', updateData,
-    'nama=eq.'+encodeURIComponent(a.nama)+'&tanggal=eq.'+a.tgl);
+    'nama=eq.'+encodeURIComponent(a.nama)+
+    '&outlet_nama=eq.'+encodeURIComponent(a.outlet)+
+    '&tanggal=eq.'+a.tgl);
 
   if(ok){
     ABSENSI[editIdx].status = newStatus;
